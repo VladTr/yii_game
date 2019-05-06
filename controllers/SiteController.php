@@ -2,16 +2,25 @@
 
 namespace app\controllers;
 
+use app\models\Result;
 use Yii;
 use yii\filters\AccessControl;
 use yii\web\Controller;
 use yii\web\Response;
 use yii\filters\VerbFilter;
 use app\models\LoginForm;
-use app\models\ContactForm;
+use app\models\User;
+use yii\web\HttpException;
 
 class SiteController extends Controller
 {
+
+    public function beforeAction($action)
+    {
+        $this->enableCsrfValidation = false;
+        return parent::beforeAction($action);
+    }
+
     /**
      * {@inheritdoc}
      */
@@ -76,8 +85,19 @@ class SiteController extends Controller
         }
 
         $model = new LoginForm();
-        if ($model->load(Yii::$app->request->post()) && $model->login()) {
-            return $this->goBack();
+
+
+        if ($model->load(Yii::$app->request->post())) {
+            $token = $model->login();
+            if($token) {
+                $cookies = Yii::$app->response->cookies;
+                $cookies->add(new \yii\web\Cookie([
+                    'name' => 'token',
+                    'value' => $token
+                ]));
+
+                return $this->render('game');
+            }
         }
 
         $model->password = '';
@@ -99,31 +119,41 @@ class SiteController extends Controller
     }
 
     /**
-     * Displays contact page.
+     * Main game controller.
      *
-     * @return Response|string
+     * @return Response
      */
-    public function actionContact()
+    public function actionGame()
     {
-        $model = new ContactForm();
-        if ($model->load(Yii::$app->request->post()) && $model->contact(Yii::$app->params['adminEmail'])) {
-            Yii::$app->session->setFlash('contactFormSubmitted');
+        $cookies = Yii::$app->request->cookies;
+        $token = $cookies->getValue('token');
+        $user = User::find()
+            ->where(['token' => $token])
+            ->one();
 
-            return $this->refresh();
+        if (!$user) {
+            throw new HttpException(404 ,'User not found');
         }
-        return $this->render('contact', [
-            'model' => $model,
-        ]);
-    }
 
-    /**
-     * Displays about page.
-     *
-     * @return string
-     */
-    public function actionAbout()
-    {
-        return $this->render('about');
+        $awardTypeId = rand(1, 3);
+        $resultModel = new Result();
+
+        switch ($awardTypeId) {
+            case 1:  //ToDo move to constant file
+                $result = $resultModel->handleAward($user->id);
+                $awardType = 'award';
+                break;
+            case 2:
+                $result = $resultModel->handleScores($user->id);
+                $awardType = 'score';
+                break;
+            case 3:
+                $result = $resultModel->handleMoney($user->id);
+                $awardType = 'money';
+                break;
+        }
+
+        return $this->asJson(['type'=>$awardType, 'value'=>$result]);
     }
 
 }
